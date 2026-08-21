@@ -1,0 +1,8 @@
+.transport{grid-template-columns:90px minmax(0,1fr) 154px!important;position:relative}
+.transport-actions{justify-self:end;display:flex;align-items:center;gap:8px}
+.speed-pill{white-space:nowrap;min-width:84px;text-align:center;box-sizing:border-box}
+.mp4-button{white-space:nowrap;border:1px solid #2d7995;background:#0c2a3a;color:#c9f5ff;border-radius:6px;padding:8px 9px;font:600 10px monospace;cursor:pointer}
+.mp4-button:hover:not(:disabled){background:#123b51;border-color:#55dfff}
+.mp4-button:disabled{opacity:.45;cursor:not-allowed}
+.export-status{position:absolute;right:164px;bottom:-19px;color:#7edfff;font:500 9px monospace;white-space:nowrap}
+@media(max-width:700px){.transport{grid-template-columns:74px minmax(0,1fr)!important}.transport-actions{gap:0}.mp4-button,.speed-pill,.export-status{display:none}}

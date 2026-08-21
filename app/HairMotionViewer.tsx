@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 
 type Point = { x: number; y: number } | null;
 type Frame = { t: number; points: Point[] };
@@ -14,7 +15,16 @@ const MARKERS = [
   { name: "P4", position: 79, color: "#ffc44d" },
 ];
 const CONNECTIONS = [[0, 1], [1, 2], [1, 3]];
-const PALETTE = Array.from({ length: 64 }, (_, index) => `hsl(${210 - index * 190 / 63} 88% 56%)`);
+// A compact, painterly 64-colour set: neutral greys (including white and black)
+// plus an evenly-spaced colour wheel, rather than a long blue-to-red ramp.
+const PALETTE = [
+  "#ffffff", "#e6e6e6", "#bdbdbd", "#969696", "#6f6f6f", "#494949", "#242424", "#000000",
+  ...Array.from({ length: 56 }, (_, index) => {
+    const hue = (index % 14) * (360 / 14);
+    const lightness = [26, 39, 52, 65][Math.floor(index / 14)];
+    return `hsl(${hue} 78% ${lightness}%)`;
+  }),
+];
 
 function numberOrNull(value: string) {
   const n = Number(value.trim());
@@ -22,18 +32,27 @@ function numberOrNull(value: string) {
 }
 
 export function parseDippCsv(buffer: ArrayBuffer, name: string): MotionData {
-  const text = new TextDecoder("shift_jis").decode(buffer).replace(/^\uFEFF/, "");
-  const rows = text.split(/\r?\n/).map((line) => line.split(","));
-  const start = rows.findIndex((row) => row.length >= 9 && numberOrNull(row[0]) !== null);
+  const decoded = ["utf-8", "shift_jis"].map((encoding) => new TextDecoder(encoding).decode(buffer).replace(/^\uFEFF/, ""));
+  const text = decoded.sort((a, b) => (a.match(/�/g)?.length ?? 0) - (b.match(/�/g)?.length ?? 0))[0];
+  const delimiter = text.split(/\r?\n/, 3).some((line) => line.includes("\t")) ? "\t" : ",";
+  const rows = text.split(/\r?\n/).map((line) => line.split(delimiter).map((cell) => cell.trim()));
+  const start = rows.findIndex((row) => row.filter((cell) => numberOrNull(cell) !== null).length >= 3);
   if (start < 0) throw new Error("数値データ行を検出できませんでした。");
+  const header = rows.slice(0, start).reverse().find((row) => row.some((cell) => /(?:^|[^a-z])p\s*[1-4]\s*[_\-\s(]*[xy]|(?:^|[^a-z])[xy][_\-\s)]*p\s*[1-4]/i.test(cell))) ?? [];
+  const columns = MARKERS.map((_, marker) => {
+    const axis = (letter: "x" | "y") => header.findIndex((cell) => new RegExp(`(?:p\\s*${marker + 1}[^a-z0-9]*${letter}|${letter}[^a-z0-9]*p\\s*${marker + 1})`, "i").test(cell));
+    const x = axis("x"), y = axis("y");
+    return x >= 0 && y >= 0 ? { x, y } : { x: marker * 2 + 1, y: marker * 2 + 2 };
+  });
+  const timeColumn = Math.max(0, header.findIndex((cell) => /^(time|t|時間)(?:\s*\([^)]*\))?$/i.test(cell)));
   const raw: Frame[] = [];
   const valid = [0, 0, 0, 0];
   for (const row of rows.slice(start)) {
-    const t = numberOrNull(row[0]);
+    const t = numberOrNull(row[timeColumn]);
     if (t === null) continue;
     const points = MARKERS.map((_, i) => {
-      const x = numberOrNull(row[i * 2 + 1] ?? "");
-      const y = numberOrNull(row[i * 2 + 2] ?? "");
+      const x = numberOrNull(row[columns[i].x] ?? "");
+      const y = numberOrNull(row[columns[i].y] ?? "");
       if (x === null || y === null) return null;
       valid[i] += 1;
       return { x, y };
@@ -95,6 +114,7 @@ export default function HairMotionViewer() {
   const [loop, setLoop] = useState(true), [loopStart, setLoopStart] = useState(0), [loopEnd, setLoopEnd] = useState(1), [lines, setLines] = useState(true), [history, setHistory] = useState(.5);
   const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [hovered, setHovered] = useState<number | null>(null);
   const [markerColors, setMarkerColors] = useState(() => MARKERS.map((marker) => marker.color)), [selectedMarker, setSelectedMarker] = useState(0);
+  const [exporting, setExporting] = useState(false), [exportStatus, setExportStatus] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null), stageRef = useRef<HTMLDivElement>(null), rafRef = useRef(0), clockRef = useRef(0);
   const viewData = useMemo(() => data ? buildViewData(data, filterOn, cutoff) : null, [data, filterOn, cutoff]);
   const bounds = useMemo(() => {
@@ -115,7 +135,7 @@ export default function HairMotionViewer() {
     const tick = (now: number) => { const dt = (now - clockRef.current) / 1000 * speed; clockRef.current = now; setTime((current) => { const next = current + dt, end = Math.max(loopEnd, loopStart + .1); if (next <= end) return next; if (loop) return loopStart + (next - loopStart) % (end - loopStart); setPlaying(false); return end; }); rafRef.current = requestAnimationFrame(tick); };
     rafRef.current = requestAnimationFrame(tick); return () => cancelAnimationFrame(rafRef.current);
   }, [playing, speed, loop, loopStart, loopEnd, viewData]);
-  const draw = useCallback(() => {
+  const draw = useCallback((renderTime = time) => {
     const canvas = canvasRef.current, stage = stageRef.current; if (!canvas || !stage || !viewData) return;
     const dpr = devicePixelRatio || 1, rect = stage.getBoundingClientRect();
     if (canvas.width !== Math.floor(rect.width * dpr) || canvas.height !== Math.floor(rect.height * dpr)) { canvas.width = Math.floor(rect.width * dpr); canvas.height = Math.floor(rect.height * dpr); }
@@ -128,7 +148,7 @@ export default function HairMotionViewer() {
     ctx.strokeStyle = "rgba(178,212,238,.22)";
     if (bounds.minX <= 0 && bounds.maxX >= 0) { const x = map({ x: 0, y: 0 }).x; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
     if (bounds.minY <= 0 && bounds.maxY >= 0) { const y = map({ x: 0, y: 0 }).y; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-    const currentIndex = Math.min(viewData.frames.length - 1, Math.round(time * 30)), current = viewData.frames[currentIndex], trailFrames = Math.round(history * 30);
+    const currentIndex = Math.min(viewData.frames.length - 1, Math.round(renderTime * 30)), current = viewData.frames[currentIndex], trailFrames = Math.round(history * 30);
     MARKERS.forEach((marker, m) => { let open = false; for (let i = Math.max(0, currentIndex - trailFrames); i <= currentIndex; i++) { const p = viewData.frames[i].points[m]; if (!p) { open = false; continue; } const q = map(p), alpha = (i - (currentIndex - trailFrames)) / Math.max(1, trailFrames); if (!open) { ctx.beginPath(); ctx.moveTo(q.x, q.y); open = true; } else ctx.lineTo(q.x, q.y); ctx.strokeStyle = markerColors[m]; ctx.globalAlpha = .08 + alpha * .5; ctx.lineWidth = 1 + alpha * 2; ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x, q.y); } ctx.globalAlpha = 1; });
     if (lines) { ctx.strokeStyle = "rgba(218,242,255,.64)"; ctx.lineWidth = 1.5; ctx.shadowColor = "#7acfff"; ctx.shadowBlur = 7; CONNECTIONS.forEach(([a, b]) => { const pa = current.points[a], pb = current.points[b]; if (!pa || !pb) return; const x = map(pa), y = map(pb); ctx.beginPath(); ctx.moveTo(x.x, x.y); ctx.lineTo(y.x, y.y); ctx.stroke(); }); ctx.shadowBlur = 0; }
     current.points.forEach((p, i) => { if (!p) return; const q = map(p), color = markerColors[i], glowColor = color.startsWith("#") ? `${color}bb` : color.replace(")", " / .73)"), r = hovered === i ? 10 : 8, glow = ctx.createRadialGradient(q.x, q.y, r, q.x, q.y, r * 3.6); glow.addColorStop(0, glowColor); glow.addColorStop(1, "transparent"); ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(q.x, q.y, r * 3.6, 0, Math.PI * 2); ctx.fill(); const ball = ctx.createRadialGradient(q.x - r * .35, q.y - r * .45, 1, q.x, q.y, r); ball.addColorStop(0, "#fff"); ball.addColorStop(.18, color); ball.addColorStop(1, "#08131d"); ctx.fillStyle = ball; ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill(); ctx.font = "600 12px Arial"; ctx.fillStyle = "rgba(238,248,255,.9)"; ctx.fillText(MARKERS[i].name, q.x + 14, q.y - 11); });
@@ -141,6 +161,33 @@ export default function HairMotionViewer() {
   };
   const openFile = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file) file.arrayBuffer().then((b) => loadBuffer(b, file.name)); };
   const drop = (event: DragEvent) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) file.arrayBuffer().then((b) => loadBuffer(b, file.name)); };
+  const exportMp4 = async () => {
+    if (!data || !viewData || !canvasRef.current || exporting) return;
+    if (!("VideoEncoder" in window) || !("VideoFrame" in window)) { setExportStatus("MP4書き出しには最新版のChromeまたはEdgeが必要です。"); return; }
+    const start = loop ? loopStart : 0, end = loop ? loopEnd : data.duration, fps = 30, frames = Math.max(1, Math.ceil((end - start) * fps));
+    try {
+      setPlaying(false); setExporting(true); setExportStatus("MP4を準備中…");
+      draw(start);
+      const canvas = canvasRef.current, target = new ArrayBufferTarget();
+      const config = { codec: "avc1.42001E", width: canvas.width, height: canvas.height, bitrate: 5_000_000, framerate: fps, avc: { format: "avc" as const } };
+      const supported = await VideoEncoder.isConfigSupported(config);
+      if (!supported.supported) throw new Error("このブラウザはH.264 MP4書き出しに対応していません。");
+      const muxer = new Muxer({ target, fastStart: "in-memory", video: { codec: "avc", width: canvas.width, height: canvas.height, frameRate: fps } });
+      let encoderError: Error | null = null;
+      const encoder = new VideoEncoder({ output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata), error: (reason) => { encoderError = reason instanceof Error ? reason : new Error(String(reason)); } });
+      encoder.configure(config);
+      for (let index = 0; index < frames; index++) {
+        draw(Math.min(end, start + index / fps));
+        const frame = new VideoFrame(canvas, { timestamp: Math.round(index * 1_000_000 / fps) });
+        encoder.encode(frame, { keyFrame: index % (fps * 2) === 0 }); frame.close();
+        if (index % 10 === 0) { setExportStatus(`MP4書き出し ${Math.round(index / frames * 100)}%`); await new Promise<void>((resolve) => setTimeout(resolve, 0)); }
+      }
+      await encoder.flush(); encoder.close(); if (encoderError) throw encoderError; muxer.finalize();
+      const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([target.buffer], { type: "video/mp4" })); link.download = `${data.name.replace(/\.csv$/i, "")}_${start.toFixed(1)}-${end.toFixed(1)}s.mp4`; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      setExportStatus("MP4を保存しました。");
+    } catch (reason) { setExportStatus(reason instanceof Error ? reason.message : "MP4を書き出せませんでした。"); }
+    finally { setExporting(false); draw(); }
+  };
   const currentPoint = hovered !== null && viewData ? viewData.frames[Math.min(viewData.frames.length - 1, Math.round(time * 30))].points[hovered] : null;
   return <main className="app-shell" onDragOver={(e) => e.preventDefault()} onDrop={drop}>
     <header className="topbar"><div><p className="eyebrow">FINE TODAY × DIPP-MOTION</p><h1>Hair Motion Viewer</h1></div><label className="file-button"><input type="file" accept=".csv,text/csv" onChange={openFile} />CSVを開く</label></header>
@@ -158,7 +205,7 @@ export default function HairMotionViewer() {
       {data && <div className="quality"><small>MISSING RATE</small>{MARKERS.map((m, i) => <div key={m.name}><span style={{ color: markerColors[i] }}>{m.name}</span><b>{(data.missing[i] * 100).toFixed(2)}%</b></div>)}</div>}
     </aside><section className="viewer-panel"><div className="viewer-head"><div><span className="live-dot" /> MOTION SPACE <small>XY · mm · 1:1</small></div><span>DISPLAY 30 Hz</span></div>
       <div className="stage" ref={stageRef}><canvas ref={canvasRef} onPointerMove={hitMarker} onPointerLeave={() => setHovered(null)} />{!data && !error && <div className="empty">Loading sample data…</div>}{error && <div className="empty error">{error}<small>CSVをここへドロップしてください</small></div>}{hovered !== null && currentPoint && <div className="tooltip"><b>{MARKERS[hovered].name}</b><span>Time <em>{time.toFixed(2)} s</em></span><span>X <em>{currentPoint.x.toFixed(2)} mm</em></span><span>Y <em>{currentPoint.y.toFixed(2)} mm</em></span><span>Scalp position <em>{MARKERS[hovered].position} / 100</em></span></div>}</div>
-      <div className="transport"><div className="buttons"><button onClick={() => setPlaying((v) => !v)} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => { setPlaying(false); setTime(loopStart); }} aria-label="Restart">↺</button></div><div className="timeline"><input aria-label="Timeline" type="range" min={0} max={data?.duration ?? 1} step={.001} value={time} onChange={(e) => setTime(Number(e.target.value))} style={{ "--progress": `${data ? time / data.duration * 100 : 0}%` } as React.CSSProperties} /><div><span>{time.toFixed(2)} s</span><span>{(data?.duration ?? 0).toFixed(2)} s</span></div></div><div className="speed-pill">{loop ? `${loopStart.toFixed(1)}–${loopEnd.toFixed(1)} s` : speed.toFixed(1) + "×"}</div></div>
+      <div className="transport"><div className="buttons"><button onClick={() => setPlaying((v) => !v)} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => { setPlaying(false); setTime(loopStart); }} aria-label="Restart">↺</button></div><div className="timeline"><input aria-label="Timeline" type="range" min={0} max={data?.duration ?? 1} step={.001} value={time} onChange={(e) => setTime(Number(e.target.value))} style={{ "--progress": `${data ? time / data.duration * 100 : 0}%` } as React.CSSProperties} /><div><span>{time.toFixed(2)} s</span><span>{(data?.duration ?? 0).toFixed(2)} s</span></div></div><div className="transport-actions"><button className="mp4-button" onClick={exportMp4} disabled={!data || exporting}>{exporting ? "MP4…" : "MP4保存"}</button><div className="speed-pill">{loop ? `${loopStart.toFixed(1)}–${loopEnd.toFixed(1)} s` : speed.toFixed(1) + "×"}</div></div>{exportStatus && <output className="export-status">{exportStatus}</output>}</div>
     </section></section>
   </main>;
 }

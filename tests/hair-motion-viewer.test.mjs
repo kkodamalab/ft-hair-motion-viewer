@@ -20,11 +20,11 @@ test("server renders the Hair Motion Viewer shell", async () => {
 
 test("client includes required data safeguards and controls", async () => {
   const source = await readFile(new URL("../app/HairMotionViewer.tsx", import.meta.url), "utf8");
-  assert.match(source, /TextDecoder\("shift_jis"\)/);
+  assert.match(source, /\["utf-8", "shift_jis"\]/);
   assert.match(source, /zeroPhaseFourthOrder/);
   assert.match(source, /t \+= 1 \/ 30/);
   assert.match(source, /if \(!p\) \{ open = false; continue; \}/);
-  for (const label of ["Low-pass filter", "Loop playback", "LOOP START", "LOOP END", "MARKER COLORS", "Connection lines", "Timeline", "Restart"]) assert.match(source, new RegExp(label));
-  assert.match(source, /length: 64/);
+  for (const label of ["Low-pass filter", "Loop playback", "LOOP START", "LOOP END", "MARKER COLORS", "Connection lines", "Timeline", "Restart", "MP4保存", "VideoEncoder"]) assert.match(source, new RegExp(label));
+  assert.match(source, /64-colour/);
   assert.match(source, /next - loopStart\) % \(end - loopStart\)/);
 });

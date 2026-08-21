@@ -23,7 +23,7 @@ npm run dev
 
 ## CSV形式
 
-CP932 / Shift-JISのDIPP-MOTION XYGraphDataを読み込みます。ヘッダ行数は固定せず、9列以上かつ先頭列が数値の最初の行をデータ開始行として検出します。
+Shift-JIS（CP932）またはUTF-8のDIPP-MOTION XYGraphDataを読み込みます。カンマ区切り・タブ区切りを判定し、`P1 X` / `P1_Y` / `X P1`のようなヘッダからP1〜P4の座標列を自動認識します。標準の列順（Time, P1 X/Y … P4 X/Y）にも対応します。
 
 | 列 | 内容 |
 |---|---|
@@ -41,7 +41,8 @@ CP932 / Shift-JISのDIPP-MOTION XYGraphDataを読み込みます。ヘッダ行�
 - Play / Pause / Restart、タイムラインのドラッグ
 - 再生速度 0.1×〜1.0×、Loop ON/OFF
 - `LOOP START` / `LOOP END` で繰り返す再生区間を指定（例：0.0〜3.0秒）
-- P1〜P4を選び、64段階の青〜シアン〜緑〜黄〜橙カラーパレットから表示色を指定
+- P1〜P4を選び、黒・白・グレーと色相環を含む64色パレットから表示色を指定
+- `MP4保存` で、現在のLoop範囲（Loop OFF時は全区間）を30 fps・音声なしMP4として保存
 - 接続線 ON/OFF、軌跡履歴 0.1〜1.0秒
 - Low-pass ON/OFF、cutoff 1〜10 Hz
 - マーカーのHoverで時刻、XY、頭頂位置を表示
@@ -63,4 +64,4 @@ XY座標とは別の毛髪上の位置メタデータです。P1=0、P2=51、P3=
 - `public/sample/B2_xy.csv` — 実データの起動時サンプル
 - `run.bat` — Windows向けワンクリック起動
 
-将来のControl / Treatment同期比較、複数Trial、MP4/GIF export、速度・加速度解析は、データ処理層と描画層を分離して追加できます。
+MP4保存にはWebCodecs対応の最新版ChromeまたはEdgeが必要です。Control / Treatment同期比較、複数Trial、GIF export、速度・加速度解析は、データ処理層と描画層を分離して追加できます。
