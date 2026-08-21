@@ -15,16 +15,10 @@ const MARKERS = [
   { name: "P4", position: 79, color: "#ffc44d" },
 ];
 const CONNECTIONS = [[0, 1], [1, 2], [1, 3]];
-// A compact, painterly 64-colour set: neutral greys (including white and black)
-// plus an evenly-spaced colour wheel, rather than a long blue-to-red ramp.
-const PALETTE = [
-  "#ffffff", "#e6e6e6", "#bdbdbd", "#969696", "#6f6f6f", "#494949", "#242424", "#000000",
-  ...Array.from({ length: 56 }, (_, index) => {
-    const hue = (index % 14) * (360 / 14);
-    const lightness = [26, 39, 52, 65][Math.floor(index / 14)];
-    return `hsl(${hue} 78% ${lightness}%)`;
-  }),
-];
+const NEUTRAL_PALETTE = ["#ffffff", "#dedede", "#bcbcbc", "#939393", "#686868", "#434343", "#202020", "#000000"];
+// One continuous spectrum, so adjacent swatches change smoothly rather than
+// forming separate hue blocks.  Red is deliberately repeated at each end.
+const RAINBOW_PALETTE = Array.from({ length: 56 }, (_, index) => `hsl(${Math.round(index * 360 / 55)} 84% 52%)`);
 
 function numberOrNull(value: string) {
   const n = Number(value.trim());
@@ -113,7 +107,7 @@ export default function HairMotionViewer() {
   const [filterOn, setFilterOn] = useState(true), [cutoff, setCutoff] = useState(5), [speed, setSpeed] = useState(1);
   const [loop, setLoop] = useState(true), [loopStart, setLoopStart] = useState(0), [loopEnd, setLoopEnd] = useState(1), [lines, setLines] = useState(true), [history, setHistory] = useState(.5);
   const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [hovered, setHovered] = useState<number | null>(null);
-  const [markerColors, setMarkerColors] = useState(() => MARKERS.map((marker) => marker.color)), [selectedMarker, setSelectedMarker] = useState(0);
+  const [markerColors, setMarkerColors] = useState(() => MARKERS.map((marker) => marker.color)), [selectedMarker, setSelectedMarker] = useState(0), [paletteOpen, setPaletteOpen] = useState(false);
   const [exporting, setExporting] = useState(false), [exportStatus, setExportStatus] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null), stageRef = useRef<HTMLDivElement>(null), rafRef = useRef(0), clockRef = useRef(0);
   const viewData = useMemo(() => data ? buildViewData(data, filterOn, cutoff) : null, [data, filterOn, cutoff]);
@@ -201,7 +195,7 @@ export default function HairMotionViewer() {
       <Range label="LOOP START" value={`${loopStart.toFixed(1)} s`} min={0} max={Math.max(0, loopEnd - .1)} step={.1} current={loopStart} onChange={(value) => { setLoopStart(value); if (time < value) setTime(value); }} disabled={!data} />
       <Range label="LOOP END" value={`${loopEnd.toFixed(1)} s`} min={Math.min(data?.duration ?? 1, loopStart + .1)} max={data?.duration ?? 1} step={.1} current={loopEnd} onChange={(value) => { setLoopEnd(value); if (time > value) setTime(value); }} disabled={!data} />
       <Control label="CONNECTIONS" value={lines ? "ON" : "OFF"}><button className={`switch ${lines ? "on" : ""}`} onClick={() => setLines((v) => !v)} aria-label="Connection lines"><i /></button></Control>
-      <div className="palette-control"><small>MARKER COLORS · 64 STEPS</small><div className="marker-tabs">{MARKERS.map((marker, index) => <button key={marker.name} className={selectedMarker === index ? "selected" : ""} onClick={() => setSelectedMarker(index)}><i style={{ background: markerColors[index] }} />{marker.name}</button>)}</div><div className="color-palette">{PALETTE.map((color, index) => <button key={color} className={markerColors[selectedMarker] === color ? "active" : ""} aria-label={`Set ${MARKERS[selectedMarker].name} color ${index + 1}`} style={{ background: color }} onClick={() => setMarkerColors((current) => current.map((item, marker) => marker === selectedMarker ? color : item))} />)}</div></div>
+      <div className="palette-control"><small>MARKER COLORS</small><div className="marker-tabs">{MARKERS.map((marker, index) => <button key={marker.name} className={selectedMarker === index && paletteOpen ? "selected" : ""} aria-expanded={selectedMarker === index && paletteOpen} onClick={() => { setSelectedMarker(index); setPaletteOpen((open) => selectedMarker === index ? !open : true); }}><i style={{ background: markerColors[index] }} />{marker.name}</button>)}</div>{paletteOpen && <div className="palette-panel"><small>{MARKERS[selectedMarker].name} · COLOR PALETTE</small><div className="neutral-palette">{NEUTRAL_PALETTE.map((color, index) => <button key={color} className={markerColors[selectedMarker] === color ? "active" : ""} aria-label={`Set ${MARKERS[selectedMarker].name} color ${index + 1}`} style={{ background: color }} onClick={() => setMarkerColors((current) => current.map((item, marker) => marker === selectedMarker ? color : item))} />)}</div><div className="color-palette">{RAINBOW_PALETTE.map((color, index) => <button key={color} className={markerColors[selectedMarker] === color ? "active" : ""} aria-label={`Set ${MARKERS[selectedMarker].name} rainbow color ${index + 1}`} style={{ background: color }} onClick={() => setMarkerColors((current) => current.map((item, marker) => marker === selectedMarker ? color : item))} />)}</div></div>}</div>
       {data && <div className="quality"><small>MISSING RATE</small>{MARKERS.map((m, i) => <div key={m.name}><span style={{ color: markerColors[i] }}>{m.name}</span><b>{(data.missing[i] * 100).toFixed(2)}%</b></div>)}</div>}
     </aside><section className="viewer-panel"><div className="viewer-head"><div><span className="live-dot" /> MOTION SPACE <small>XY · mm · 1:1</small></div><span>DISPLAY 30 Hz</span></div>
       <div className="stage" ref={stageRef}><canvas ref={canvasRef} onPointerMove={hitMarker} onPointerLeave={() => setHovered(null)} />{!data && !error && <div className="empty">Loading sample data…</div>}{error && <div className="empty error">{error}<small>CSVをここへドロップしてください</small></div>}{hovered !== null && currentPoint && <div className="tooltip"><b>{MARKERS[hovered].name}</b><span>Time <em>{time.toFixed(2)} s</em></span><span>X <em>{currentPoint.x.toFixed(2)} mm</em></span><span>Y <em>{currentPoint.y.toFixed(2)} mm</em></span><span>Scalp position <em>{MARKERS[hovered].position} / 100</em></span></div>}</div>
