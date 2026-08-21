@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./palette.css";
 import "./transport.css";
+import "./viewport.css";
 
 export const metadata: Metadata = {
   title: "Hair Motion Viewer",

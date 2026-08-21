@@ -1,0 +1,6 @@
+.viewer-head .view-tools{display:flex;align-items:center;gap:14px}
+.view-tools button{border:1px solid #24485e;background:#0a1a25;color:#91dff3;border-radius:5px;padding:5px 7px;font:600 8px monospace;letter-spacing:.08em;cursor:pointer}
+.view-tools button:hover{border-color:#4dd9ff;color:#d7f8ff}
+canvas{cursor:grab;touch-action:none}
+canvas.panning{cursor:grabbing}
+@media(max-width:700px){.viewer-head .view-tools button{display:none}.viewer-head .view-tools{gap:0}}
