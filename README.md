@@ -41,6 +41,7 @@ CP932 / Shift-JISのDIPP-MOTION XYGraphDataを読み込みます。ヘッダ行�
 - Play / Pause / Restart、タイムラインのドラッグ
 - 再生速度 0.1×〜1.0×、Loop ON/OFF
 - `LOOP START` / `LOOP END` で繰り返す再生区間を指定（例：0.0〜3.0秒）
+- P1〜P4を選び、64段階の青〜シアン〜緑〜黄〜橙カラーパレットから表示色を指定
 - 接続線 ON/OFF、軌跡履歴 0.1〜1.0秒
 - Low-pass ON/OFF、cutoff 1〜10 Hz
 - マーカーのHoverで時刻、XY、頭頂位置を表示
