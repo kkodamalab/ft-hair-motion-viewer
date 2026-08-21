@@ -24,5 +24,6 @@ test("client includes required data safeguards and controls", async () => {
   assert.match(source, /zeroPhaseFourthOrder/);
   assert.match(source, /t \+= 1 \/ 30/);
   assert.match(source, /if \(!p\) \{ open = false; continue; \}/);
-  for (const label of ["Low-pass filter", "Loop playback", "Connection lines", "Timeline", "Restart"]) assert.match(source, new RegExp(label));
+  for (const label of ["Low-pass filter", "Loop playback", "LOOP START", "LOOP END", "Connection lines", "Timeline", "Restart"]) assert.match(source, new RegExp(label));
+  assert.match(source, /next - loopStart\) % \(end - loopStart\)/);
 });

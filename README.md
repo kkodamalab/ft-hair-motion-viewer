@@ -40,6 +40,7 @@ CP932 / Shift-JISのDIPP-MOTION XYGraphDataを読み込みます。ヘッダ行�
 - `CSVを開く` または画面へのDrag & Dropでファイルを読み込み
 - Play / Pause / Restart、タイムラインのドラッグ
 - 再生速度 0.1×〜1.0×、Loop ON/OFF
+- `LOOP START` / `LOOP END` で繰り返す再生区間を指定（例：0.0〜3.0秒）
 - 接続線 ON/OFF、軌跡履歴 0.1〜1.0秒
 - Low-pass ON/OFF、cutoff 1〜10 Hz
 - マーカーのHoverで時刻、XY、頭頂位置を表示

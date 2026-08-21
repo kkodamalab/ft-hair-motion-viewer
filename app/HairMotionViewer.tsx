@@ -91,7 +91,7 @@ function buildViewData(data: MotionData, useFilter: boolean, cutoff: number): Vi
 export default function HairMotionViewer() {
   const [data, setData] = useState<MotionData | null>(null), [error, setError] = useState("");
   const [filterOn, setFilterOn] = useState(true), [cutoff, setCutoff] = useState(5), [speed, setSpeed] = useState(1);
-  const [loop, setLoop] = useState(true), [lines, setLines] = useState(true), [history, setHistory] = useState(.5);
+  const [loop, setLoop] = useState(true), [loopStart, setLoopStart] = useState(0), [loopEnd, setLoopEnd] = useState(1), [lines, setLines] = useState(true), [history, setHistory] = useState(.5);
   const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [hovered, setHovered] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null), stageRef = useRef<HTMLDivElement>(null), rafRef = useRef(0), clockRef = useRef(0);
   const viewData = useMemo(() => data ? buildViewData(data, filterOn, cutoff) : null, [data, filterOn, cutoff]);
@@ -103,16 +103,16 @@ export default function HairMotionViewer() {
     return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad };
   }, [data]);
   const loadBuffer = useCallback((buffer: ArrayBuffer, name: string) => {
-    try { setData(parseDippCsv(buffer, name)); setTime(0); setPlaying(false); setError(""); }
+    try { const parsed = parseDippCsv(buffer, name); setData(parsed); setLoopStart(0); setLoopEnd(parsed.duration); setTime(0); setPlaying(false); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : "CSVを読み込めませんでした。"); }
   }, []);
   useEffect(() => { fetch("/sample/B2_xy.csv").then((r) => r.arrayBuffer()).then((b) => loadBuffer(b, "B2_xy.csv")).catch(() => setError("サンプルCSVを読み込めませんでした。")); }, [loadBuffer]);
   useEffect(() => {
     if (!playing || !viewData) return;
     clockRef.current = performance.now();
-    const tick = (now: number) => { const dt = (now - clockRef.current) / 1000 * speed; clockRef.current = now; setTime((current) => { const next = current + dt; if (next <= viewData.duration) return next; if (loop) return next % viewData.duration; setPlaying(false); return viewData.duration; }); rafRef.current = requestAnimationFrame(tick); };
+    const tick = (now: number) => { const dt = (now - clockRef.current) / 1000 * speed; clockRef.current = now; setTime((current) => { const next = current + dt, end = Math.max(loopEnd, loopStart + .1); if (next <= end) return next; if (loop) return loopStart + (next - loopStart) % (end - loopStart); setPlaying(false); return end; }); rafRef.current = requestAnimationFrame(tick); };
     rafRef.current = requestAnimationFrame(tick); return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, speed, loop, viewData]);
+  }, [playing, speed, loop, loopStart, loopEnd, viewData]);
   const draw = useCallback(() => {
     const canvas = canvasRef.current, stage = stageRef.current; if (!canvas || !stage || !viewData) return;
     const dpr = devicePixelRatio || 1, rect = stage.getBoundingClientRect();
@@ -148,11 +148,14 @@ export default function HairMotionViewer() {
       <Control label="LOW-PASS" value={filterOn ? "ON" : "OFF"}><button className={`switch ${filterOn ? "on" : ""}`} onClick={() => setFilterOn((v) => !v)} aria-label="Low-pass filter"><i /></button></Control>
       <Range label="CUTOFF" value={`${cutoff} Hz`} min={1} max={10} step={1} current={cutoff} onChange={setCutoff} disabled={!filterOn} />
       <Range label="SPEED" value={`${speed.toFixed(1)}×`} min={.1} max={1} step={.1} current={speed} onChange={setSpeed} /><Range label="HISTORY" value={`${history.toFixed(1)} s`} min={.1} max={1} step={.1} current={history} onChange={setHistory} />
-      <Control label="LOOP" value={loop ? "ON" : "OFF"}><button className={`switch ${loop ? "on" : ""}`} onClick={() => setLoop((v) => !v)} aria-label="Loop playback"><i /></button></Control><Control label="CONNECTIONS" value={lines ? "ON" : "OFF"}><button className={`switch ${lines ? "on" : ""}`} onClick={() => setLines((v) => !v)} aria-label="Connection lines"><i /></button></Control>
+      <Control label="LOOP" value={loop ? "ON" : "OFF"}><button className={`switch ${loop ? "on" : ""}`} onClick={() => setLoop((v) => !v)} aria-label="Loop playback"><i /></button></Control>
+      <Range label="LOOP START" value={`${loopStart.toFixed(1)} s`} min={0} max={Math.max(0, loopEnd - .1)} step={.1} current={loopStart} onChange={(value) => { setLoopStart(value); if (time < value) setTime(value); }} disabled={!data} />
+      <Range label="LOOP END" value={`${loopEnd.toFixed(1)} s`} min={Math.min(data?.duration ?? 1, loopStart + .1)} max={data?.duration ?? 1} step={.1} current={loopEnd} onChange={(value) => { setLoopEnd(value); if (time > value) setTime(value); }} disabled={!data} />
+      <Control label="CONNECTIONS" value={lines ? "ON" : "OFF"}><button className={`switch ${lines ? "on" : ""}`} onClick={() => setLines((v) => !v)} aria-label="Connection lines"><i /></button></Control>
       {data && <div className="quality"><small>MISSING RATE</small>{MARKERS.map((m, i) => <div key={m.name}><span style={{ color: m.color }}>{m.name}</span><b>{(data.missing[i] * 100).toFixed(2)}%</b></div>)}</div>}
     </aside><section className="viewer-panel"><div className="viewer-head"><div><span className="live-dot" /> MOTION SPACE <small>XY · mm · 1:1</small></div><span>DISPLAY 30 Hz</span></div>
       <div className="stage" ref={stageRef}><canvas ref={canvasRef} onPointerMove={hitMarker} onPointerLeave={() => setHovered(null)} />{!data && !error && <div className="empty">Loading sample data…</div>}{error && <div className="empty error">{error}<small>CSVをここへドロップしてください</small></div>}{hovered !== null && currentPoint && <div className="tooltip"><b>{MARKERS[hovered].name}</b><span>Time <em>{time.toFixed(2)} s</em></span><span>X <em>{currentPoint.x.toFixed(2)} mm</em></span><span>Y <em>{currentPoint.y.toFixed(2)} mm</em></span><span>Scalp position <em>{MARKERS[hovered].position} / 100</em></span></div>}</div>
-      <div className="transport"><div className="buttons"><button onClick={() => setPlaying((v) => !v)} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => { setPlaying(false); setTime(0); }} aria-label="Restart">↺</button></div><div className="timeline"><input aria-label="Timeline" type="range" min={0} max={data?.duration ?? 1} step={.001} value={time} onChange={(e) => setTime(Number(e.target.value))} style={{ "--progress": `${data ? time / data.duration * 100 : 0}%` } as React.CSSProperties} /><div><span>{time.toFixed(2)} s</span><span>{(data?.duration ?? 0).toFixed(2)} s</span></div></div><div className="speed-pill">{speed.toFixed(1)}×</div></div>
+      <div className="transport"><div className="buttons"><button onClick={() => setPlaying((v) => !v)} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => { setPlaying(false); setTime(loopStart); }} aria-label="Restart">↺</button></div><div className="timeline"><input aria-label="Timeline" type="range" min={0} max={data?.duration ?? 1} step={.001} value={time} onChange={(e) => setTime(Number(e.target.value))} style={{ "--progress": `${data ? time / data.duration * 100 : 0}%` } as React.CSSProperties} /><div><span>{time.toFixed(2)} s</span><span>{(data?.duration ?? 0).toFixed(2)} s</span></div></div><div className="speed-pill">{loop ? `${loopStart.toFixed(1)}–${loopEnd.toFixed(1)} s` : speed.toFixed(1) + "×"}</div></div>
     </section></section>
   </main>;
 }
